@@ -3,10 +3,13 @@
 import { SocialIcon } from "react-social-icons";
 import { Card } from "@/components/ui/card";
 import { CheckCircle } from "lucide-react";
+import { SiGmail } from '@icons-pack/react-simple-icons';
+
 
 interface ConnectionPickerProps {
   isConnected: boolean;        // true when Supabase has an active Google session
   connectedEmail?: string;     // the connected Google account email
+  permission?: "read-only" | "read-send";
   onSelectGmail: () => void;
   onSelectDemo: () => void;
   onDisconnect: () => void;
@@ -15,6 +18,7 @@ interface ConnectionPickerProps {
 export function ConnectionPicker({
   isConnected,
   connectedEmail,
+  permission,
   onSelectGmail,
   onSelectDemo,
   onDisconnect,
@@ -60,8 +64,7 @@ export function ConnectionPicker({
             className="flex items-center gap-4 p-[18px] rounded-[18px] bg-[#1F1B16] border-transparent cursor-pointer hover:bg-[#2a251e] transition-colors h-full"
           >
             <div className="w-10 h-10 shrink-0">
-              <SocialIcon network="google" style={{ height: 40, width: 40 }} />
-            </div>
+             <SiGmail color="#EA4335" size={40} /> </div>
             <div className="flex flex-col">
               <span className="text-[16.5px] font-bold text-[#F7F3EC]">Connect Gmail</span>
               <span className="text-[12px] text-[#A39E93]">read your inbox with Rico</span>
@@ -100,13 +103,18 @@ export function ConnectionPicker({
 
         {/* If connected, allow jumping straight into chat */}
         {isConnected && (
-          <div className="md:col-span-2 flex justify-center md:pt-4">
+          <div className="md:col-span-2 flex flex-col items-center justify-center md:pt-4">
             <button
               onClick={onSelectGmail}
               className="w-full md:max-w-[400px] h-14 bg-[#F5A524] hover:bg-[#e0941f] text-[#291A05] text-[16px] font-bold rounded-[18px] transition-colors mt-1"
             >
               Open Rico
             </button>
+            {permission === "read-only" && (
+              <span className="text-[#A39E93] text-[12px] mt-4">
+                Want Rico to draft and send emails? Disconnect and reconnect.
+              </span>
+            )}
           </div>
         )}
       </div>

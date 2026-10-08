@@ -5,11 +5,11 @@ import { Mic, Square, LogOut, Mail, Send, AudioWaveform, LucideAudioLines } from
 import ReactMarkdown from "react-markdown";
 import { startListening, stopListening, speak, cancelSpeech } from "@/lib/voice";
 import { VoiceVisualizer } from "./VoiceVisualizer";
-import { GmailAuthExpiredError } from "@/lib/gmail";
+import { GmailAuthExpiredError, sendEmail } from "@/lib/gmail";
 
 interface Message {
   id: string;
-  role: "user" | "rico";
+  role: "user" | "rico" | "system";
   content: string;
   recalled?: string[];
 }
@@ -32,6 +32,7 @@ export function Chat({ userId, gmailToken, gmailPermission, userEmail, onDisconn
   const [interim, setInterim] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastMsgId, setLastMsgId] = useState<string | undefined>(undefined);
+  const [pendingDraft, setPendingDraft] = useState<{ to: string; subject: string; body: string; inReplyToMsgId?: string } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
   // Track current speaking text to show in voice mode
@@ -62,6 +63,38 @@ export function Chat({ userId, gmailToken, gmailPermission, userEmail, onDisconn
     setIsProcessing(true);
     setSpeakingText("");
 
+    if (pendingDraft) {
+      if (/^(yes|yeah|yep|send it|confirm|go ahead|ok(ay)?|sure)$/i.test(text.trim())) {
+        try {
+          await sendEmail(gmailToken!, pendingDraft.to, pendingDraft.subject, pendingDraft.body, pendingDraft.inReplyToMsgId);
+          setMessages((prev) => [...prev, { id: Math.random().toString(), role: "system", content: "Sent." }]);
+        } catch (e: any) {
+          console.error("Failed to send email:", e);
+          if (e instanceof GmailAuthExpiredError || e.name === "GmailAuthExpiredError") {
+            if (onGmailAuthExpired) onGmailAuthExpired();
+            return;
+          } else {
+            setMessages((prev) => [...prev, { id: Math.random().toString(), role: "system", content: "Failed to send email." }]);
+          }
+        }
+        setPendingDraft(null);
+        setIsProcessing(false);
+        return;
+      } else {
+        // If they said something else, clear draft and proceed normally
+        setPendingDraft(null);
+      }
+    }
+
+    // Build history
+    const history = messages
+      .filter((m) => m.role === "user" || m.role === "rico")
+      .slice(-6)
+      .map((m) => ({
+        role: m.role === "rico" ? "assistant" : "user",
+        content: m.content.slice(0, 1500),
+      }));
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -72,6 +105,7 @@ export function Chat({ userId, gmailToken, gmailPermission, userEmail, onDisconn
           gmailToken: gmailToken ?? undefined,
           gmailPermission,
           lastMsgId,
+          history,
         }),
       });
       const data = await res.json();
@@ -82,6 +116,10 @@ export function Chat({ userId, gmailToken, gmailPermission, userEmail, onDisconn
       }
 
       if (data.lastMsgId) setLastMsgId(data.lastMsgId);
+
+      if (data.emailPreview) {
+        setPendingDraft(data.emailPreview);
+      }
 
       setMessages((prev) => [
         ...prev,
@@ -114,6 +152,30 @@ export function Chat({ userId, gmailToken, gmailPermission, userEmail, onDisconn
     } finally {
       setIsProcessing(false);
     }
+  }
+
+  async function handleConfirmDraft() {
+    if (!gmailToken || !pendingDraft) return;
+    setIsProcessing(true);
+    try {
+      await sendEmail(gmailToken, pendingDraft.to, pendingDraft.subject, pendingDraft.body, pendingDraft.inReplyToMsgId);
+      setMessages((prev) => [...prev, { id: Math.random().toString(), role: "system", content: "Sent." }]);
+    } catch (e: any) {
+      console.error("Failed to send email:", e);
+      if (e instanceof GmailAuthExpiredError || e.name === "GmailAuthExpiredError") {
+        if (onGmailAuthExpired) onGmailAuthExpired();
+      } else {
+        setMessages((prev) => [...prev, { id: Math.random().toString(), role: "system", content: "Failed to send email." }]);
+      }
+    } finally {
+      setPendingDraft(null);
+      setIsProcessing(false);
+    }
+  }
+
+  function handleCancelDraft() {
+    setPendingDraft(null);
+    setMessages((prev) => [...prev, { id: Math.random().toString(), role: "system", content: "Draft discarded." }]);
   }
 
   function toggleMic() {
@@ -207,7 +269,11 @@ export function Chat({ userId, gmailToken, gmailPermission, userEmail, onDisconn
         <div className="flex-1 flex flex-col gap-3 pt-3.5 overflow-y-auto pb-[200px]">
           {messages.map((m) => (
             <div key={m.id} className="flex flex-col">
-              {m.role === "user" ? (
+              {m.role === "system" ? (
+                <div className="self-center text-[#A39E93] text-[13px] italic my-2">
+                  {m.content}
+                </div>
+              ) : m.role === "user" ? (
                 <div className="self-end bg-[#52360C] text-[#F7F3EC] rounded-[18px] px-4 py-3 text-[15px] max-w-[280px] md:max-w-[320px]">
                   {m.content}
                 </div>
@@ -241,6 +307,34 @@ export function Chat({ userId, gmailToken, gmailPermission, userEmail, onDisconn
               )}
             </div>
           ))}
+          {pendingDraft && (
+            <div className="self-center flex flex-col gap-2 bg-[#2A251E] border border-[#3A352D] rounded-[14px] p-4 mt-2 w-full max-w-[340px]">
+              <div className="text-[#A39E93] text-[12px] font-bold uppercase tracking-wider mb-1">
+                Draft Email
+              </div>
+              <div className="text-[14px] text-[#F7F3EC] flex flex-col gap-1">
+                <div><span className="text-[#A39E93]">To:</span> {pendingDraft.to}</div>
+                <div><span className="text-[#A39E93]">Subject:</span> {pendingDraft.subject}</div>
+                <div className="mt-2 text-[13px] whitespace-pre-wrap font-mono bg-[#141210] p-2 rounded-[8px]">{pendingDraft.body}</div>
+              </div>
+              <div className="flex items-center gap-2 mt-3">
+                <button
+                  onClick={handleConfirmDraft}
+                  disabled={isProcessing}
+                  className="flex-1 bg-[#4ADE80] text-[#141210] font-bold py-2 px-3 rounded-[10px] text-[13px] hover:bg-[#3bca6b] transition-colors disabled:opacity-50"
+                >
+                  Confirm send
+                </button>
+                <button
+                  onClick={handleCancelDraft}
+                  disabled={isProcessing}
+                  className="flex-1 border border-[#3A352D] text-[#A39E93] font-bold py-2 px-3 rounded-[10px] text-[13px] hover:text-[#F7F3EC] hover:bg-[#141210] transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
           <div ref={messagesEndRef} />
         </div>
       )}

@@ -172,6 +172,13 @@ export async function fetchRecentMessages(
   return messages;
 }
 
+function base64UrlEncode(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  let binary = "";
+  bytes.forEach((b) => { binary += String.fromCharCode(b); });
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 /** Send a raw MIME email */
 export async function sendEmail(
   token: string,
@@ -183,16 +190,14 @@ export async function sendEmail(
   const mimeLines = [
     `To: ${to}`,
     `Subject: ${subject}`,
-    "Content-Type: text/plain; charset=UTF-8",
+    'Content-Type: text/plain; charset="UTF-8"',
+    "Content-Transfer-Encoding: 8bit",
     "MIME-Version: 1.0",
     ...(inReplyToMsgId ? [`In-Reply-To: ${inReplyToMsgId}`] : []),
     "",
     body,
   ];
-  const raw = btoa(mimeLines.join("\r\n"))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  const raw = base64UrlEncode(mimeLines.join("\r\n"));
 
   const res = await fetch(`${GMAIL_BASE}/messages/send`, {
     method: "POST",

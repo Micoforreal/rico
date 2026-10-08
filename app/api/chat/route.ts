@@ -45,15 +45,34 @@ const gmailTools = [
   }
 ];
 
+const draftTool = {
+  type: "function" as const,
+  function: {
+    name: "gmail_draft",
+    description: "Draft an email reply or a new email. Return the full draft details. Do NOT output the draft in your message text, ONLY use this tool.",
+    parameters: {
+      type: "object",
+      properties: {
+        to: { type: "string" },
+        subject: { type: "string" },
+        body: { type: "string", description: "The full text body of the email" },
+        inReplyToMsgId: { type: "string", description: "Message ID if replying" }
+      },
+      required: ["to", "subject", "body"]
+    }
+  }
+};
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { userId, message, gmailToken, lastMsgId, gmailPermission } = body as {
+    const { userId, message, gmailToken, lastMsgId, gmailPermission, history = [] } = body as {
       userId: string;
       message: string;
       gmailToken?: string;
       lastMsgId?: string;
       gmailPermission?: "read-only" | "read-send";
+      history?: { role: "user" | "assistant"; content: string }[];
     };
 
     if (!userId || !message) {
@@ -72,6 +91,7 @@ export async function POST(req: NextRequest) {
 
     const messages: ChatCompletionMessageParam[] = [
       { role: "system", content: systemContent },
+      ...history.map(m => ({ role: m.role, content: m.content }) as ChatCompletionMessageParam),
       { role: "user", content: message },
     ];
 
@@ -79,17 +99,23 @@ export async function POST(req: NextRequest) {
     let reply = "";
     let newLastMsgId: string | undefined = lastMsgId;
     let gmailAuthExpired = false;
+    let emailPreview: any = undefined;
+
+    const availableTools = [...gmailTools];
+    if (gmailPermission === "read-send") {
+      availableTools.push(draftTool);
+    }
 
     let rounds = 0;
     while (rounds < 3) {
       rounds++;
 
-      console.log(`[chat] round ${rounds}: tools offered:`, gmailToken ? gmailTools.map(t => t.function.name) : "NONE (no gmailToken)");
+      console.log(`[chat] round ${rounds}: tools offered:`, gmailToken ? availableTools.map(t => t.function.name) : "NONE (no gmailToken)");
 
       const completion = await groq.chat.completions.create({
         model: GROQ_MODEL,
         messages,
-        tools: gmailToken ? gmailTools : undefined,
+        tools: gmailToken ? availableTools : undefined,
         tool_choice: gmailToken ? "auto" : undefined,
         max_tokens: 1024,
       });
@@ -135,6 +161,15 @@ export async function POST(req: NextRequest) {
                 toolResult = JSON.stringify(res);
                 newLastMsgId = res.id;
               }
+            } else if (toolCall.function.name === "gmail_draft") {
+              emailPreview = {
+                to: args.to,
+                subject: args.subject,
+                body: args.body,
+                inReplyToMsgId: args.inReplyToMsgId
+              };
+              reply = "Here's your draft — confirm to send.";
+              break;
             } else {
               toolResult = "Unknown tool.";
             }
@@ -153,6 +188,11 @@ export async function POST(req: NextRequest) {
             tool_call_id: toolCall.id,
             content: toolResult,
           });
+        }
+        
+        // If we intercepted a draft and set reply, break outer loop
+        if (emailPreview) {
+          break;
         }
       } else {
         reply = responseMessage.content || "";
@@ -179,6 +219,7 @@ export async function POST(req: NextRequest) {
       recalled: memoryTexts,
       lastMsgId: newLastMsgId,
       gmailAuthExpired,
+      emailPreview,
     });
 
   } catch (err) {

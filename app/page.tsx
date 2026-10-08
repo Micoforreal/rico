@@ -32,8 +32,16 @@ export default function Home() {
     async function restoreSession() {
       const { data } = await supabase.auth.getSession();
       if (data.session?.provider_token) {
-        const permission = (data.session.user.user_metadata?.permission ??
-          "read-only") as "read-only" | "read-send";
+        let permission = (data.session.user.user_metadata?.permission ?? "read-only") as "read-only" | "read-send";
+        
+        // If we just returned from OAuth, grab the pending choice and persist it
+        const pending = localStorage.getItem("rico_pending_permission");
+        if (pending) {
+          permission = pending as "read-only" | "read-send";
+          localStorage.removeItem("rico_pending_permission");
+          await supabase.auth.updateUser({ data: { permission } });
+        }
+
         setSession({
           userId: data.session.user.id,
           userEmail: data.session.user.email ?? "",
@@ -48,10 +56,17 @@ export default function Home() {
     restoreSession();
 
     // Listen for sign-in/sign-out changes during the session
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, supabaseSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, supabaseSession) => {
       if (supabaseSession?.provider_token) {
-        const permission = (supabaseSession.user.user_metadata?.permission ??
-          "read-only") as "read-only" | "read-send";
+        let permission = (supabaseSession.user.user_metadata?.permission ?? "read-only") as "read-only" | "read-send";
+        
+        const pending = localStorage.getItem("rico_pending_permission");
+        if (pending) {
+          permission = pending as "read-only" | "read-send";
+          localStorage.removeItem("rico_pending_permission");
+          await supabase.auth.updateUser({ data: { permission } });
+        }
+
         setSession({
           userId: supabaseSession.user.id,
           userEmail: supabaseSession.user.email ?? "",
@@ -88,13 +103,15 @@ export default function Home() {
     return (
       <div className="flex flex-col h-screen w-screen bg-[#141210] items-center justify-center">
         {sessionExpiredNotice && (
-          <div className="bg-[#52360C] text-[#F7F3EC] px-4 py-2 rounded-[12px] text-sm mb-4">
-            {sessionExpiredNotice}
+          <div className="bg-[#52360C] text-[#F7F3EC] px-4 py-3 rounded-[12px] text-[14px] mb-6 flex flex-col items-center max-w-sm text-center border border-[#F5A524] shadow-lg">
+            <b>{sessionExpiredNotice}</b>
+            <span className="text-[#A39E93] text-[13px] mt-1">If you changed permissions, reconnect to apply them.</span>
           </div>
         )}
         <ConnectionPicker
           isConnected={!!session?.isGmail}
           connectedEmail={session?.userEmail}
+          permission={session?.permission}
           onSelectGmail={() => {
             setSessionExpiredNotice(null);
             setFlow("permission");
@@ -113,6 +130,7 @@ export default function Home() {
     return (
       <PermissionChoice
         onContinue={async (level) => {
+          localStorage.setItem("rico_pending_permission", level);
           const supabase = createBrowserSupabase();
           const scopes =
             level === "read-only"
@@ -126,8 +144,6 @@ export default function Home() {
               queryParams: { access_type: "offline", prompt: "consent" },
             },
           });
-          // Store permission choice in user_metadata after redirect-back via onAuthStateChange
-          // We embed it as a query param so it survives the redirect
         }}
         onBack={() => setFlow("picker")}
       />
