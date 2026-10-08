@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Mic, Square, LogOut, Mail, Send, AudioWaveform, LucideAudioLines } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 import { startListening, stopListening, speak, cancelSpeech } from "@/lib/voice";
 import { VoiceVisualizer } from "./VoiceVisualizer";
 import { GmailAuthExpiredError } from "@/lib/gmail";
@@ -212,8 +213,24 @@ export function Chat({ userId, gmailToken, gmailPermission, userEmail, onDisconn
                 </div>
               ) : (
                 <div className="flex flex-col gap-1.5 self-start">
-                  <div className="self-start bg-[#1F1B16] text-[#F7F3EC] rounded-[18px] px-4 py-3.5 text-[14.5px] leading-relaxed max-w-[300px] md:max-w-[340px] whitespace-pre-wrap">
-                    {m.content}
+                  <div className="self-start bg-[#1F1B16] text-[#F7F3EC] rounded-[18px] px-4 py-3.5 text-[14.5px] leading-relaxed max-w-[300px] md:max-w-[340px] prose-rico">
+                    <ReactMarkdown
+                      components={{
+                        p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                        strong: ({ children }) => <strong className="font-semibold text-[#F5A524]">{children}</strong>,
+                        em: ({ children }) => <em className="italic opacity-80">{children}</em>,
+                        code: ({ children }) => <code className="bg-[#2a2318] text-[#F5A524] rounded px-1 py-0.5 text-[12.5px] font-mono">{children}</code>,
+                        pre: ({ children }) => <pre className="bg-[#0e0c09] rounded-[10px] p-3 overflow-x-auto text-[12px] font-mono my-2">{children}</pre>,
+                        ul: ({ children }) => <ul className="list-disc pl-4 space-y-1 my-1">{children}</ul>,
+                        ol: ({ children }) => <ol className="list-decimal pl-4 space-y-1 my-1">{children}</ol>,
+                        li: ({ children }) => <li className="text-[14px]">{children}</li>,
+                        a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-[#F5A524] underline underline-offset-2 hover:opacity-80">{children}</a>,
+                        blockquote: ({ children }) => <blockquote className="border-l-2 border-[#F5A524] pl-3 opacity-70 italic my-2">{children}</blockquote>,
+                        hr: () => <hr className="border-[#3A352D] my-3" />,
+                      }}
+                    >
+                      {m.content}
+                    </ReactMarkdown>
                   </div>
                   {m.recalled && m.recalled.length > 0 && (
                     <div className="self-start bg-[rgba(245,165,36,0.14)] text-[#F5A524] text-[11px] font-bold rounded-[20px] px-2.5 py-1">

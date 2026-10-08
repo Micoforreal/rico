@@ -85,20 +85,24 @@ ${snippets.map((s, i) => `${i + 1}. From: ${s.from} | Subject: ${s.subject} | Da
     response_format: { type: "json_object" },
   });
 
-  const raw = completion.choices[0]?.message?.content ?? "{}";
+  const raw = completion.choices[0]?.message?.content ?? '{"promos":0,"flagged":[]}';
+  let parsed: { promos?: number; flagged?: Array<{ subject: string; from: string; reason: string }> } = { promos: 0, flagged: [] };
+  
   try {
-    const parsed = JSON.parse(raw);
-    const promos = parsed.promos ?? 0;
-    const flagged = parsed.flagged ?? [];
-    const flaggedCount = snippets.length - promos;
-    const summary =
-      flagged.length > 0
-        ? `mostly noise — ${promos} promos. But you've got ${flagged.length === 1 ? "one" : flagged.length} worth opening: ${flagged.map((f: { from: string; reason: string }) => `${f.from} (${f.reason})`).join(", ")}. Want me to read it out?`
-        : `${promos} promos, ${flaggedCount} other${flaggedCount !== 1 ? "s" : ""} — mostly noise, nothing urgent.`;
-    return { promos, flagged, summary };
+    parsed = JSON.parse(raw);
   } catch {
-    return { promos: 0, flagged: [], summary: "had trouble reading the inbox — try again in a sec." };
+    // keep default
   }
+
+  const promos = parsed.promos ?? 0;
+  const flagged = parsed.flagged ?? [];
+  const flaggedCount = snippets.length - promos;
+  const summary =
+    flagged.length > 0
+      ? `mostly noise — ${promos} promos. But you've got ${flagged.length === 1 ? "one" : flagged.length} worth opening: ${flagged.map((f: { from: string; reason: string }) => `${f.from} (${f.reason})`).join(", ")}. Want me to read it out?`
+      : `${promos} promos, ${flaggedCount} other${flaggedCount !== 1 ? "s" : ""} — mostly noise, nothing urgent.`;
+      
+  return { promos, flagged, summary };
 }
 
 /** Condense a full email body to 2–3 spoken sentences */
@@ -142,42 +146,37 @@ Write only the email body — no "Subject:" line, no greeting preamble, just the
   return completion.choices[0]?.message?.content?.trim() ?? "";
 }
 
-/** Extract salient facts from a conversation turn for memory storage */
+/** Extract salient facts from a conversation turn for memory storage.
+ *  Uses plain-text mode — gpt-oss-20b 400s on response_format: json_object
+ *  for short outputs. Worst case this returns []. */
 export async function extractSalientFacts(
   userMessage: string,
   assistantReply: string
 ): Promise<string[]> {
   const groq = getGroqClient();
-  const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
-  const prompt = `Extract 0–3 salient facts worth remembering from this conversation turn. Return ONLY a raw JSON array of strings — no markdown, no wrapping keys, no explanation. Each fact must be a complete sentence with date context. If nothing is worth storing, return [].
 
-Today: ${today}
-User said: "${userMessage}"
-Rico replied: "${assistantReply}"
+  // Truncate inputs so long inbox digests never blow the token budget
+  const truncatedUser = userMessage.slice(0, 800);
+  const truncatedReply = assistantReply.slice(0, 1200);
 
-Example output: ["Fact one.", "Fact two."]`;
+  const prompt = `From this exchange, list up to 5 salient facts worth remembering across sessions. One fact per line, no numbering, no bullets, no JSON. If nothing is worth remembering, reply with exactly: NONE.
+
+User said: "${truncatedUser}"
+Rico replied: "${truncatedReply}"`;
 
   const completion = await groq.chat.completions.create({
     model: GROQ_MODEL,
     messages: [{ role: "user", content: prompt }],
-    max_tokens: 200,
+    max_tokens: 300,
     temperature: 0.2,
-    // response_format intentionally omitted — this model returns empty strings
-    // for short json_object outputs, triggering json_validate_failed errors.
+    // response_format intentionally omitted — json_object mode 400s on short outputs
   });
 
-  try {
-    const raw = (completion.choices[0]?.message?.content ?? "").trim();
-    if (!raw) return [];
-
-    // Extract the first [...] block in case the model wraps the array in prose
-    const match = raw.match(/\[[\s\S]*\]/);
-    if (!match) return [];
-
-    const parsed = JSON.parse(match[0]);
-    if (Array.isArray(parsed)) return parsed.filter((f) => typeof f === "string");
-    return [];
-  } catch {
-    return [];
-  }
+  const text = completion.choices[0]?.message?.content?.trim() ?? "";
+  if (!text || /^none\.?$/i.test(text)) return [];
+  return text
+    .split("\n")
+    .map((l) => l.replace(/^[-*\d.)\]]+\s*/, "").trim())
+    .filter(Boolean)
+    .slice(0, 5);
 }
