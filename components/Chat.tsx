@@ -28,7 +28,7 @@ export function Chat({ userId, gmailToken, gmailPermission, userEmail, onDisconn
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [textInput, setTextInput] = useState("");
-  const [mode, setMode] = useState<"voice" | "text">("voice");
+  const [mode, setMode] = useState<"voice" | "text">("text");
   const [interim, setInterim] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastMsgId, setLastMsgId] = useState<string | undefined>(undefined);
