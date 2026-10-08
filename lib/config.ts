@@ -10,6 +10,19 @@ export const MEMWAL_SERVER_URL =
   process.env.MEMWAL_SERVER_URL ??
   "https://relayer-staging.memory.walrus.xyz";
 
+/**
+ * Which Walrus network this relayer writes to.
+ * "testnet" — relayer URL contains "staging" or "testnet"
+ * "mainnet" — everything else
+ */
+export const WALRUS_NETWORK: "testnet" | "mainnet" =
+  /staging|testnet/i.test(MEMWAL_SERVER_URL) ? "testnet" : "mainnet";
+
+/** Return the Walruscan explorer URL for a given blob ID */
+export function walrusScanUrl(blobId: string): string {
+  return `https://walruscan.com/${WALRUS_NETWORK}/blob/${blobId}`;
+}
+
 /** Per-user namespace prefix */
 export const NAMESPACE_PREFIX = "rico";
 
@@ -46,13 +59,13 @@ export const ELEVENLABS_VOICE_ID =
 export const DEMO_USERS = [
   {
     id: "user-ada",
-    name: "Ada",
+    name: "Maya",
     label: "Gmail demo — invoice arc",
     permission: "read-only" as const,
   },
   {
     id: "user-tunde",
-    name: "Tunde",
+    name: "Daniel",
     label: "Gmail demo — read & send",
     permission: "read-send" as const,
   },
@@ -73,7 +86,7 @@ You are Rico — a sharp, warm AI assistant with a real memory. You speak like a
 Rules:
 - Short sentences. Lowercase-friendly. Zero corporate speak. No em dashes.
 - Never say "as an AI" or "I don't have feelings."
-- When you recall a stored memory, say so naturally — "oh — last Tuesday you asked about Ada's invoice..." — never announce "accessing memory" or "based on my memory."
+- When you recall a stored memory, say so naturally — "oh — last Tuesday you asked about Maya's invoice..." — never announce "accessing memory" or "based on my memory."
 - When you're working with Gmail context, be specific: name the sender, subject, amount.
 - When you draft a reply to send, always show the full draft text and explicitly ask for a yes before sending.
 - Never send without an explicit per-message confirmation.

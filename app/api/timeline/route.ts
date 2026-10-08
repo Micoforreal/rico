@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
 
     const { data, error } = await supabase
       .from("memory_log")
-      .select("memory_id, blob_id, text, user_id, namespace, created_at, superseded_by")
+      .select("memory_id, blob_id, text, user_id, namespace, created_at, superseded_by, walrus_network")
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(100);

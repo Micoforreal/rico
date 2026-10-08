@@ -10,6 +10,7 @@ import {
   RECALL_MAX_DISTANCE,
   DEDUPE_DISTANCE,
   MEMWAL_TIMEOUT_MS,
+  WALRUS_NETWORK,
 } from "./config";
 import { createServerSupabase, insertMemoryLog } from "./supabase";
 
@@ -124,6 +125,7 @@ export async function writeMemory(
         namespace: ns,
         created_at: new Date().toISOString(),
         superseded_by: null,
+        walrus_network: WALRUS_NETWORK,
       });
 
     console.log("[memory] wrote:", JSON.stringify({ userId, text: text.slice(0, 80), id: typed.id, blob_id: typed.blob_id ?? null }));

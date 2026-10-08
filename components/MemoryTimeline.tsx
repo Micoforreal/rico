@@ -8,12 +8,15 @@ interface Memory {
   text: string;
   created_at: string;
   superseded_by: string | null;
+  blob_id: string | null;
+  walrus_network: "testnet" | "mainnet" | null;
 }
 
 export function MemoryTimeline({ userId }: { userId: string }) {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [loading, setLoading] = useState(true);
   const [isResetting, setIsResetting] = useState(false);
+  const [selectedMemory, setSelectedMemory] = useState<Memory | null>(null);
 
   async function fetchTimeline() {
     try {
@@ -86,7 +89,8 @@ export function MemoryTimeline({ userId }: { userId: string }) {
             {groupMemories.map((m) => (
               <div
                 key={m.memory_id}
-                className="bg-[#1F1B16] rounded-[14px] px-4 py-3.5 flex flex-col gap-1.5"
+                onClick={() => setSelectedMemory(m)}
+                className="bg-[#1F1B16] rounded-[14px] px-4 py-3.5 flex flex-col gap-1.5 cursor-pointer hover:bg-[#2a251e] transition-colors border border-transparent hover:border-[#3A352D]"
               >
                 <div className="flex items-center gap-2.5">
                   <span className="text-[14.5px] text-[#F7F3EC] leading-snug break-words">
@@ -118,6 +122,64 @@ export function MemoryTimeline({ userId }: { userId: string }) {
         >
           {isResetting ? "Resetting..." : "Reset demo data"}
         </button>
+      )}
+
+      {selectedMemory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-[#1F1B16] border border-[#3A352D] rounded-[24px] p-6 w-full max-w-md flex flex-col gap-5 shadow-2xl relative">
+            <button
+              onClick={() => setSelectedMemory(null)}
+              className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-[#3A352D] text-[#F7F3EC] hover:bg-[#52360C] transition-colors"
+            >
+              ✕
+            </button>
+            <h3 className="text-[18px] font-bold text-[#F7F3EC] pr-8 leading-tight">
+              Memory Details
+            </h3>
+            
+            <div className="flex flex-col gap-1">
+              <span className="text-[12px] font-bold text-[#A39E93] uppercase tracking-wider">Content</span>
+              <p className="text-[15px] text-[#F7F3EC] leading-relaxed">
+                {selectedMemory.text}
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <span className="text-[12px] font-bold text-[#A39E93] uppercase tracking-wider">Storage</span>
+              {selectedMemory.blob_id ? (
+                <div className="flex flex-col gap-2 mt-1">
+                  <div className="flex items-center gap-2">
+                    <span className="bg-[rgba(245,165,36,0.14)] text-[#F5A524] text-[11px] font-bold rounded-full px-2.5 py-1 uppercase tracking-wide">
+                      {selectedMemory.walrus_network || "testnet"}
+                    </span>
+                    <span className="text-[13px] font-mono text-[#A39E93] truncate" title={selectedMemory.blob_id}>
+                      {selectedMemory.blob_id.slice(0, 12)}...{selectedMemory.blob_id.slice(-8)}
+                    </span>
+                  </div>
+                  <a
+                    href={`https://walruscan.com/${selectedMemory.walrus_network || "testnet"}/blob/${selectedMemory.blob_id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="self-start text-[#F5A524] text-[14px] font-medium hover:underline underline-offset-4 decoration-2 mt-1"
+                  >
+                    View on Walruscan →
+                  </a>
+                </div>
+              ) : (
+                <span className="text-[14px] text-[#A39E93] italic">
+                  Not persisted to Walrus (demo user data)
+                </span>
+              )}
+            </div>
+            
+            <div className="flex flex-col gap-1 mt-1">
+              <span className="text-[12px] font-bold text-[#A39E93] uppercase tracking-wider">Date</span>
+              <span className="text-[14px] text-[#F7F3EC]">
+                {new Date(selectedMemory.created_at).toLocaleString()}
+              </span>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

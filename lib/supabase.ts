@@ -26,6 +26,7 @@ export interface MemoryLogRow {
   namespace: string;
   created_at: string;
   superseded_by: string | null;
+  walrus_network: "testnet" | "mainnet" | null;
 }
 
 export async function insertMemoryLog(
