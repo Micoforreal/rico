@@ -23,6 +23,7 @@ export default function Home() {
   const [flow, setFlow] = useState<FlowState>("picker");
   const [session, setSession] = useState<GmailSession | null>(null);
   const [showMobileMemory, setShowMobileMemory] = useState(false);
+  const [sessionExpiredNotice, setSessionExpiredNotice] = useState<string | null>(null);
 
   // On mount: check if Supabase already has a session (handles redirect-back from Google OAuth)
   useEffect(() => {
@@ -78,15 +79,33 @@ export default function Home() {
     setFlow("picker");
   }
 
+  async function handleGmailAuthExpired() {
+    await handleDisconnect();
+    setSessionExpiredNotice("Your Gmail session expired. Please reconnect.");
+  }
+
   if (flow === "picker") {
     return (
-      <ConnectionPicker
-        isConnected={!!session?.isGmail}
-        connectedEmail={session?.userEmail}
-        onSelectGmail={() => setFlow("permission")}
-        onSelectDemo={() => setFlow("demo-switcher")}
-        onDisconnect={handleDisconnect}
-      />
+      <div className="flex flex-col h-screen w-screen bg-[#141210] items-center justify-center">
+        {sessionExpiredNotice && (
+          <div className="bg-[#52360C] text-[#F7F3EC] px-4 py-2 rounded-[12px] text-sm mb-4">
+            {sessionExpiredNotice}
+          </div>
+        )}
+        <ConnectionPicker
+          isConnected={!!session?.isGmail}
+          connectedEmail={session?.userEmail}
+          onSelectGmail={() => {
+            setSessionExpiredNotice(null);
+            setFlow("permission");
+          }}
+          onSelectDemo={() => {
+            setSessionExpiredNotice(null);
+            setFlow("demo-switcher");
+          }}
+          onDisconnect={handleDisconnect}
+        />
+      </div>
     );
   }
 
@@ -163,6 +182,7 @@ export default function Home() {
             gmailPermission={session.permission}
             userEmail={session.userEmail}
             onDisconnect={handleDisconnect}
+            onGmailAuthExpired={handleGmailAuthExpired}
           />
         </div>
       </div>

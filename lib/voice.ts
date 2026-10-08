@@ -98,6 +98,10 @@ export function getCurrentVoiceIndicator(): VoiceIndicator {
   return currentVoiceIndicator;
 }
 
+export function getActiveAudio(): HTMLAudioElement | null {
+  return activeAudio;
+}
+
 /**
  * Speak text using the configured provider chain.
  *   "groq"       → Groq TTS only (via /api/tts)

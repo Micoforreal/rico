@@ -78,6 +78,7 @@ export async function POST(req: NextRequest) {
     const groq = getGroqClient();
     let reply = "";
     let newLastMsgId: string | undefined = lastMsgId;
+    let gmailAuthExpired = false;
 
     let rounds = 0;
     while (rounds < 3) {
@@ -137,9 +138,14 @@ export async function POST(req: NextRequest) {
             } else {
               toolResult = "Unknown tool.";
             }
-          } catch (e) {
+          } catch (e: any) {
             console.error(`Tool error (${toolCall.function.name}):`, e);
-            toolResult = `Error executing tool: ${String(e)}`;
+            if (e.name === "GmailAuthExpiredError") {
+              toolResult = "The user's Gmail session has expired. Please tell them they need to reconnect their account.";
+              gmailAuthExpired = true;
+            } else {
+              toolResult = `Error executing tool: ${String(e)}`;
+            }
           }
 
           messages.push({
@@ -172,6 +178,7 @@ export async function POST(req: NextRequest) {
       reply,
       recalled: memoryTexts,
       lastMsgId: newLastMsgId,
+      gmailAuthExpired,
     });
 
   } catch (err) {

@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Mic, Square, LogOut, Mail, Send, AudioWaveform, AudioWaveformIcon, LucideAudioWaveform, LucideWaves, LucideWavesHorizontal } from "lucide-react";
+import { Mic, Square, LogOut, Mail, Send, AudioWaveform, LucideAudioLines } from "lucide-react";
 import { startListening, stopListening, speak, cancelSpeech } from "@/lib/voice";
+import { VoiceVisualizer } from "./VoiceVisualizer";
+import { GmailAuthExpiredError } from "@/lib/gmail";
 
 interface Message {
   id: string;
@@ -13,29 +15,31 @@ interface Message {
 
 interface ChatProps {
   userId: string;
-  gmailToken?: string;       // present only for real Gmail users
+  gmailToken?: string;
   gmailPermission?: "read-only" | "read-send";
   userEmail?: string;
   onDisconnect: () => void;
+  onGmailAuthExpired?: () => void;
 }
 
-export function Chat({ userId, gmailToken, gmailPermission, userEmail, onDisconnect }: ChatProps) {
+export function Chat({ userId, gmailToken, gmailPermission, userEmail, onDisconnect, onGmailAuthExpired }: ChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isListening, setIsListening] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [textInput, setTextInput] = useState("");
   const [mode, setMode] = useState<"voice" | "text">("voice");
   const [interim, setInterim] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
-  // Track the last email Rico mentioned so "read it" follow-ups work correctly
   const [lastMsgId, setLastMsgId] = useState<string | undefined>(undefined);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // Track current speaking text to show in voice mode
+  const [speakingText, setSpeakingText] = useState("");
 
-  // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, interim]);
+  }, [messages, interim, mode]);
 
-  // Greet real Gmail users on first load
   useEffect(() => {
     if (gmailToken && messages.length === 0) {
       const name = userEmail?.split("@")[0] ?? "there";
@@ -46,7 +50,6 @@ export function Chat({ userId, gmailToken, gmailPermission, userEmail, onDisconn
       };
       setMessages([greeting]);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gmailToken]);
 
   async function handleSend(text: string, fromVoice: boolean = false) {
@@ -56,9 +59,7 @@ export function Chat({ userId, gmailToken, gmailPermission, userEmail, onDisconn
     setMessages((prev) => [...prev, { id: msgId, role: "user", content: text }]);
     setTextInput("");
     setIsProcessing(true);
-
-
-    console.log("[chat-client] sending:", { userId, hasGmailToken: !!gmailToken, lastMsgId });
+    setSpeakingText("");
 
     try {
       const res = await fetch("/api/chat", {
@@ -67,7 +68,6 @@ export function Chat({ userId, gmailToken, gmailPermission, userEmail, onDisconn
         body: JSON.stringify({
           userId,
           message: text,
-          // Pass the Gmail token server-side so the API can call Gmail on behalf of the user
           gmailToken: gmailToken ?? undefined,
           gmailPermission,
           lastMsgId,
@@ -75,7 +75,11 @@ export function Chat({ userId, gmailToken, gmailPermission, userEmail, onDisconn
       });
       const data = await res.json();
 
-      // Persist the last email ID for follow-up turns
+      if (data.gmailAuthExpired && onGmailAuthExpired) {
+        onGmailAuthExpired();
+        return;
+      }
+
       if (data.lastMsgId) setLastMsgId(data.lastMsgId);
 
       setMessages((prev) => [
@@ -88,24 +92,36 @@ export function Chat({ userId, gmailToken, gmailPermission, userEmail, onDisconn
         },
       ]);
 
-      if (fromVoice) {
+      if (fromVoice || mode === "voice") {
+        setSpeakingText(data.reply);
+        setIsSpeaking(true);
         await speak(data.reply);
+        setIsSpeaking(false);
+        setSpeakingText("");
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      if (e instanceof GmailAuthExpiredError || e.name === "GmailAuthExpiredError") {
+        if (onGmailAuthExpired) onGmailAuthExpired();
+        return;
+      }
       setMessages((prev) => [
         ...prev,
         { id: Math.random().toString(), role: "rico", content: "Sorry, I ran into an error." },
       ]);
+      setIsSpeaking(false);
     } finally {
       setIsProcessing(false);
     }
   }
 
   function toggleMic() {
-    if (isListening) {
+    if (isListening || isSpeaking) {
       stopListening();
+      cancelSpeech();
       setIsListening(false);
+      setIsSpeaking(false);
+      setSpeakingText("");
       setInterim("");
     } else {
       cancelSpeech();
@@ -135,90 +151,97 @@ export function Chat({ userId, gmailToken, gmailPermission, userEmail, onDisconn
   const isGmailUser = !!gmailToken;
 
   return (
-    <div className="flex flex-col flex-1 h-full max-h-screen relative w-full mx-auto px-5 py-8 md:py-10">
-      {/* Header */}
-      <header className="flex items-center gap-3 mb-1.5 shrink-0">
-        <img
-          className="w-10 h-10 rounded-full object-cover border-[1.5px] border-[rgba(245,165,36,0.28)] bg-[#241d12]"
-          src="/rico-face.webp"
-          alt="Rico"
-        />
-        <div className="flex flex-col gap-0.5">
-          <b className="text-[#f7f3ec9e] text-[16px]">Rico</b>
-          <span className="text-[#ffe1a167] text-[12px]">
-            {isListening ? "listening…" : isProcessing ? "thinking…" : "online"}
-          </span>
-        </div>
+    <div className="flex flex-col flex-1 h-full max-h-screen relative w-full mx-auto px-5 py-8 md:py-10 bg-[#141210]">
+      {/* Header - Hidden in Voice mode */}
+      {mode === "text" && (
+        <header className="flex items-center gap-3 mb-1.5 shrink-0">
+          <img
+            className="w-10 h-10 rounded-full object-cover border-[1.5px] border-[rgba(245,165,36,0.28)] bg-[#241d12]"
+            src="/rico-face.webp"
+            alt="Rico"
+          />
+          <div className="flex flex-col gap-0.5">
+            <b className="text-[#f7f3ec9e] text-[16px]">Rico</b>
+            <span className="text-[#ffe1a167] text-[12px]">
+              {isProcessing ? "thinking…" : "online"}
+            </span>
+          </div>
+        </header>
+      )}
 
+      {/* Main Content Area */}
+      {mode === "voice" ? (
+        // Voice Hero UI
+        <div className="flex-1 flex flex-col items-center justify-center relative w-full">
+          {/* Wave ring + Mic Button */}
+          <div className="relative w-full max-w-[400px] aspect-square flex items-center justify-center -mt-10">
+            <VoiceVisualizer isListening={isListening} isSpeaking={isSpeaking} />
+            <button
+              onClick={toggleMic}
+              className={`w-[92px] h-[92px] rounded-full flex items-center justify-center gap-1.5 z-10 transition-transform ${isListening || isSpeaking ? 'bg-[#52360C] border-2 border-[#F5A524] scale-110' : 'bg-[#1F1B16] border border-[#F5A524] hover:scale-105'}`}
+            >
+              {isListening || isSpeaking ? (
+                <LucideAudioLines strokeWidth={2.5} color="#F5A524" fill="#F5A524" size={28} />
+              ) : (
+                <Mic strokeWidth={2.5} color="#F5A524" size={32} />
+              )}
+            </button>
+          </div>
 
-      </header>
-
-      {/* Messages */}
-      <div className="flex-1 flex flex-col gap-3 pt-3.5 overflow-y-auto pb-[200px]">
-        {messages.map((m) => (
-          <div key={m.id} className="flex flex-col">
-            {m.role === "user" ? (
-              <div className="self-end bg-[#52360C] text-[#F7F3EC] rounded-[18px] px-4 py-3 text-[15px] max-w-[280px] md:max-w-[320px]">
-                {m.content}
-              </div>
+          {/* Subtext area */}
+          <div className="h-[120px] flex items-start justify-center text-center px-6 -mt-6 z-10 w-full max-w-md">
+            {isListening ? (
+              <p className="text-[#f7f3ecab] text-[18px] leading-relaxed italic">{interim || "Listening..."}</p>
+            ) : isSpeaking ? (
+              <p className="text-[#F7F3EC] text-[18px] leading-relaxed font-medium line-clamp-4">{speakingText}</p>
+            ) : isProcessing ? (
+              <p className="text-[#A39E93] text-[16px] animate-pulse">Thinking...</p>
             ) : (
-              <div className="flex flex-col gap-1.5 self-start">
-                <div className="self-start bg-[#1F1B16] text-[#F7F3EC] rounded-[18px] px-4 py-3.5 text-[14.5px] leading-relaxed max-w-[300px] md:max-w-[340px] whitespace-pre-wrap">
-                  {m.content}
-                </div>
-                {m.recalled && m.recalled.length > 0 && (
-                  <div className="self-start bg-[rgba(245,165,36,0.14)] text-[#F5A524] text-[11px] font-bold rounded-[20px] px-2.5 py-1">
-                    recalled {m.recalled.length} memor{m.recalled.length === 1 ? "y" : "ies"}
-                  </div>
-                )}
-              </div>
+              <p className="text-[#A39E93] text-[15px]">Tap to talk</p>
             )}
           </div>
-        ))}
-        {interim && (
-          <div className="self-end bg-[#52360C] text-[#f7f3ecab] rounded-[18px] px-4 py-3 text-[15px] max-w-[280px] opacity-70">
-            {interim}
-          </div>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Bottom input bar */}
-      <div className="absolute bottom-6 left-0 right-0 flex flex-col items-center gap-2.5 pointer-events-auto bg-gradient-to-t from-[#141210] via-[#141210] to-transparent pt-10 px-5 pb-2">
-        {mode === "voice" ? (
-          <>
-            <div className="relative w-[168px] h-[168px] flex items-center justify-center">
-              {isListening && (
-                <div
-                  className="absolute inset-0 rounded-full"
-                  style={{
-                    background: "radial-gradient(circle, rgba(245,165,36,0.35) 0%, rgba(245,165,36,0) 70%)",
-                  }}
-                />
+        </div>
+      ) : (
+        // Text Thread UI
+        <div className="flex-1 flex flex-col gap-3 pt-3.5 overflow-y-auto pb-[200px]">
+          {messages.map((m) => (
+            <div key={m.id} className="flex flex-col">
+              {m.role === "user" ? (
+                <div className="self-end bg-[#52360C] text-[#F7F3EC] rounded-[18px] px-4 py-3 text-[15px] max-w-[280px] md:max-w-[320px]">
+                  {m.content}
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1.5 self-start">
+                  <div className="self-start bg-[#1F1B16] text-[#F7F3EC] rounded-[18px] px-4 py-3.5 text-[14.5px] leading-relaxed max-w-[300px] md:max-w-[340px] whitespace-pre-wrap">
+                    {m.content}
+                  </div>
+                  {m.recalled && m.recalled.length > 0 && (
+                    <div className="self-start bg-[rgba(245,165,36,0.14)] text-[#F5A524] text-[11px] font-bold rounded-[20px] px-2.5 py-1">
+                      recalled {m.recalled.length} memor{m.recalled.length === 1 ? "y" : "ies"}
+                    </div>
+                  )}
+                </div>
               )}
-              <button
-                onClick={toggleMic}
-                className="w-[92px] h-[92px] rounded-full border-2 border-[#F5A524] flex items-center justify-center gap-1.5 z-10 hover:scale-105 transition-transform"
-              >
-                {isListening ? (
-                  <AudioWaveform className="animate-pulse" color="#F5A524" size={32} />
-                ) : (
-                  <Mic strokeWidth={2.5} color="#F5A524" size={32} />
-                )}
-              </button>
             </div>
-            <div className="text-[#A39E93] text-[13px] -mt-4 mb-2">Tap to talk</div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setMode("text")}
-                className="text-[#A39E93] text-[13.5px] hover:text-[#F7F3EC] transition-colors"
-              >
-                type instead
-              </button>
-            </div>
-          </>
+          ))}
+          <div ref={messagesEndRef} />
+        </div>
+      )}
+
+      {/* Bottom Controls */}
+      <div className={`absolute bottom-6 left-0 right-0 flex flex-col items-center gap-2.5 pointer-events-auto pt-10 px-5 pb-2 ${mode === "text" ? "bg-gradient-to-t from-[#141210] via-[#141210] to-transparent" : ""}`}>
+        {mode === "voice" ? (
+          <button
+            onClick={() => {
+              setMode("text");
+              if (isListening || isSpeaking) toggleMic();
+            }}
+            className="text-[#A39E93] text-[14px] hover:text-[#F7F3EC] transition-colors py-2 px-4 rounded-full border border-transparent hover:border-[#3A352D] bg-[#1F1B16] z-10 shadow-lg"
+          >
+            Type instead
+          </button>
         ) : (
-          <div className="flex flex-col w-full gap-3">
+          <div className="flex flex-col w-full gap-3 max-w-3xl mx-auto">
             <div className="flex items-center gap-2">
               <input
                 type="text"
@@ -236,41 +259,38 @@ export function Chat({ userId, gmailToken, gmailPermission, userEmail, onDisconn
                 <Send size={20} className="-ml-0.5" />
               </button>
             </div>
-            <div className="flex items-center justify-between w-full px-2">
+            <div className="flex items-center justify-center w-full px-2">
               <button
                 onClick={() => setMode("voice")}
-                className="flex items-center gap-2 text-[#A39E93] text-[13.5px] hover:text-[#F7F3EC] transition-colors"
+                className="flex items-center gap-2 text-[#A39E93] text-[14px] hover:text-[#F7F3EC] transition-colors py-1 px-3 rounded-full hover:bg-[#1F1B16]"
               >
-                <Mic size={16} /> tap to talk
+                <Mic size={16} /> Tap to talk
               </button>
             </div>
           </div>
         )}
       </div>
 
-        
-<div className="absolute top-8 right-5 flex  flex-col items-end   gap-3 text-[12px] text-[#A39E93] hover:text-[#F7F3EC] transition-colors">
-   {isGmailUser && (
+      {/* Top Right Controls */}
+      <div className="absolute top-8 right-5 flex flex-col items-end gap-3 text-[12px] text-[#A39E93] hover:text-[#F7F3EC] transition-colors z-50">
+        {isGmailUser && (
           <div className="flex items-center gap-1.5 bg-[#1F1B16] rounded-full px-2.5 py-1 ml-1">
-            {/* <Mail size={11} className="text-[#F5A524]" /> */}
             <span className="text-[11px] text-[#84837fc4] max-w-[120px] truncate">
-              {userEmail}             </span>
+              {userEmail}
+            </span>
             {gmailPermission === "read-send" && (
               <span className="text-[10px] text-[#4ADE80] font-bold">+send</span>
             )}
           </div>
         )}
-
-      {/* Disconnect button */}
-      <button
-        onClick={onDisconnect}
-        className=" flex items-center gap-2 border rounded-2xl px-2.5 py-1">
-        <LogOut size={13} />
-        {isGmailUser ? "Disconnect" : "Sign out"}
-      </button>
+        <button
+          onClick={onDisconnect}
+          className="flex items-center gap-2 border border-[#3A352D] bg-[#141210] rounded-2xl px-2.5 py-1 hover:bg-[#1F1B16]"
+        >
+          <LogOut size={13} />
+          {isGmailUser ? "Disconnect" : "Sign out"}
+        </button>
+      </div>
     </div>
-</div>
-
-    
   );
 }

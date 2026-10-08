@@ -125,6 +125,9 @@ export async function writeMemory(
         created_at: new Date().toISOString(),
         superseded_by: null,
       });
+
+      console.log("[memory] wrote:", JSON.stringify({ userId, text: text.slice(0, 80), id: typed.id }));
+
     } catch (supabaseErr) {
       console.error("[memory] Supabase memory_log insert failed (non-fatal)", supabaseErr);
     }

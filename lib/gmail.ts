@@ -1,8 +1,15 @@
 /**
- * Gmail API helpers — client-side only.
+ * Gmail API helpers.
  * Uses the Supabase session.provider_token to call Gmail directly.
  * No Gmail secrets on the server — the token is the user's own OAuth token.
  */
+
+export class GmailAuthExpiredError extends Error {
+  constructor(message = "Gmail session expired") {
+    super(message);
+    this.name = "GmailAuthExpiredError";
+  }
+}
 
 const GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
 
@@ -30,10 +37,13 @@ async function listMessages(
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
   });
- if (!res.ok) {
-  const body = await res.text();
-  throw new Error(`Gmail list failed: ${res.status} — ${body}`);
-}
+  if (res.status === 401) {
+    throw new GmailAuthExpiredError();
+  }
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Gmail list failed: ${res.status} — ${body}`);
+  }
   const data = await res.json();
   return (data.messages ?? []).map((m: { id: string }) => m.id);
 }
@@ -47,10 +57,13 @@ async function fetchMessageMetadata(
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
   });
- if (!res.ok) {
-  const body = await res.text();
-  throw new Error(`Gmail list failed: ${res.status} — ${body}`);
-}
+  if (res.status === 401) {
+    throw new GmailAuthExpiredError();
+  }
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Gmail list failed: ${res.status} — ${body}`);
+  }
   const data = await res.json();
   const headers: Array<{ name: string; value: string }> = data.payload?.headers ?? [];
   const get = (name: string) =>
@@ -102,10 +115,13 @@ export async function fetchFullMessage(
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
   });
- if (!res.ok) {
-  const body = await res.text();
-  throw new Error(`Gmail list failed: ${res.status} — ${body}`);
-}
+  if (res.status === 401) {
+    throw new GmailAuthExpiredError();
+  }
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Gmail list failed: ${res.status} — ${body}`);
+  }
   const data = await res.json();
   const headers: Array<{ name: string; value: string }> = data.payload?.headers ?? [];
   const get = (name: string) =>
@@ -143,10 +159,13 @@ export async function fetchRecentMessages(
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
   });
- if (!res.ok) {
-  const body = await res.text();
-  throw new Error(`Gmail list failed: ${res.status} — ${body}`);
-}
+  if (res.status === 401) {
+    throw new GmailAuthExpiredError();
+  }
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Gmail list failed: ${res.status} — ${body}`);
+  }
   const data = await res.json();
   const ids: string[] = (data.messages ?? []).map((m: { id: string }) => m.id);
   const messages = await Promise.all(ids.map((id) => fetchMessageMetadata(token, id)));
@@ -183,6 +202,9 @@ export async function sendEmail(
     },
     body: JSON.stringify({ raw }),
   });
+  if (res.status === 401) {
+    throw new GmailAuthExpiredError();
+  }
   if (!res.ok) {
     const err = await res.text();
     throw new Error(`Gmail send failed: ${res.status} — ${err}`);
