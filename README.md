@@ -1,36 +1,60 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Rico — Chatbots That Remember
 
-## Getting Started
+Rico is a voice-first AI assistant that *remembers*. Talk to it, and it holds a conversation across sessions using the **Walrus** memory layer.
 
-First, run the development server:
+## Setup Instructions
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+1. **Supabase & Database**
+   - Create a Supabase project (Free Tier).
+   - Enable the Google provider in Authentication.
+   - Run the following SQL to create the memory table:
+     ```sql
+     create table memory_log (
+       memory_id text primary key,
+       blob_id text,
+       text text not null,
+       user_id text not null,
+       namespace text not null,
+       created_at timestamptz not null,
+       superseded_by text
+     );
+     ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. **Google Cloud & Gmail API**
+   - Create a Google Cloud project (in testing mode).
+   - Enable the Gmail API and add these scopes to the consent screen: `https://www.googleapis.com/auth/gmail.readonly` and `https://www.googleapis.com/auth/gmail.send`. (Note: `.send` is sensitive, testing mode is fine for demos).
+   - Add test users.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+3. **Text-to-Speech (Google Cloud TTS)**
+   - Enable the Cloud Text-to-Speech API in the same project.
+   - Create an API key restricted to this API. (A billing account might be required for the project, though usage will likely stay in the free tier).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+4. **MemWal (Walrus Memory)**
+   - Generate a delegate key and account ID at the staging dashboard: `https://staging.memory.walrus.xyz`.
 
-## Learn More
+5. **Environment Variables**
+   Create a `.env.local` file at the root:
+   ```env
+   # SERVER (Do not leak)
+   GROQ_API_KEY=your_groq_key
+   MEMWAL_PRIVATE_KEY=your_memwal_delegate_key_hex
+   MEMWAL_ACCOUNT_ID=your_memwal_account_id
+   MEMWAL_SERVER_URL=https://relayer-staging.memory.walrus.xyz
+   SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 
-To learn more about Next.js, take a look at the following resources:
+   # CLIENT (Safe for frontend bundle)
+   NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+   NEXT_PUBLIC_GOOGLE_TTS_API_KEY=your_google_tts_api_key
+   ```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+6. **Seed Demo Data**
+   - Start the dev server: `npm run dev`
+   - In another terminal, run: `node scripts/seed.mjs`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+7. **Deploy**
+   - Push to GitHub and connect to Vercel. Ensure all environment variables (server and client) are added in the Vercel dashboard.
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Caveats & Notes
+- The TTS API key is shipped in the frontend bundle (NEXT_PUBLIC_). In a true production app, this would be proxied through the server.
+- The `MEMWAL_SERVER_URL` must point to the staging relayer to avoid 401 errors.
