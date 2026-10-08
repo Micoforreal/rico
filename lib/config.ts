@@ -22,15 +22,25 @@ export const DEDUPE_DISTANCE = 0.25;
 /** MemWal timeouts */
 export const MEMWAL_TIMEOUT_MS = 25000;
 
-/** TTS provider priority: "google" | "elevenlabs" | "browser" */
-export type TtsProvider = "google" | "elevenlabs" | "browser";
+/**
+ * TTS provider:
+ *   "groq"        → Groq TTS only (via /api/tts)
+ *   "elevenlabs"  → ElevenLabs only
+ *   "auto"        → Groq first, ElevenLabs second; silence on all failures
+ * No browser speechSynthesis fallback — ever.
+ */
+export type TtsProvider = "groq" | "elevenlabs" | "auto";
 export const TTS_PROVIDER: TtsProvider =
   (process.env.NEXT_PUBLIC_TTS_PROVIDER as TtsProvider | undefined) ??
-  "google";
+  "auto";
 
-/** Google Cloud TTS voice */
-export const GOOGLE_TTS_VOICE = "en-US-Wavenet-F";
-export const GOOGLE_TTS_LANGUAGE = "en-US";
+/** Groq TTS voice (default: troy) */
+export const GROQ_TTS_VOICE =
+  process.env.GROQ_TTS_VOICE ?? "troy";
+
+/** ElevenLabs voice ID — swap this env var to change the voice without touching code */
+export const ELEVENLABS_VOICE_ID =
+  process.env.NEXT_PUBLIC_ELEVENLABS_VOICE_ID ?? "OhisAd2u8Q6qSA4xXAAT";
 
 /** Demo user definitions — no real auth, no wallets */
 export const DEMO_USERS = [

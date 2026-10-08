@@ -2,13 +2,13 @@
 /**
  * Voice I/O — client-side only.
  * Speech-to-text: Web Speech API (SpeechRecognition / webkitSpeechRecognition)
- * Text-to-speech: provider chain — Google Cloud TTS → ElevenLabs → browser speechSynthesis
+ * Text-to-speech: Groq TTS → ElevenLabs provider chain. No browser
+ * speechSynthesis fallback — real-sounding voice or silence.
  */
 
 import {
   TTS_PROVIDER,
-  GOOGLE_TTS_VOICE,
-  GOOGLE_TTS_LANGUAGE,
+  ELEVENLABS_VOICE_ID,
 } from "./config";
 
 // ─── Speech Recognition ───────────────────────────────────────────────────────
@@ -84,82 +84,103 @@ export function stopListening(): void {
   }
 }
 
-// ─── Text-to-Speech ───────────────────────────────────────────────────────────
+// ─── Text-to-Speech (Groq → ElevenLabs, no browser fallback) ───────────────
 
-export type VoiceIndicator = "google" | "elevenlabs" | "browser" | "off";
+export type VoiceIndicator = "groq" | "elevenlabs" | "off";
 
 let currentVoiceIndicator: VoiceIndicator = "off";
+/** The currently-playing Audio element — used by cancelSpeech() */
+let activeAudio: HTMLAudioElement | null = null;
+/** Object URL held by activeAudio that needs revoking on cancel */
+let activeObjectUrl: string | null = null;
 
 export function getCurrentVoiceIndicator(): VoiceIndicator {
   return currentVoiceIndicator;
 }
 
-/** Speaks text using the configured provider chain */
+/**
+ * Speak text using the configured provider chain.
+ *   "groq"       → Groq TTS only (via /api/tts)
+ *   "elevenlabs" → ElevenLabs only
+ *   "auto"       → Groq first, ElevenLabs second
+ * Never touches browser speechSynthesis. Never rejects — logs and stays silent on failure.
+ */
 export async function speak(text: string): Promise<void> {
-  // Google Cloud TTS
-  if (TTS_PROVIDER === "google") {
-    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_TTS_API_KEY;
-    if (apiKey) {
-      try {
-        await speakGoogle(text, apiKey);
-        currentVoiceIndicator = "google";
-        return;
-      } catch (e) {
-        console.warn("[TTS] Google failed, falling back:", e);
-      }
+  currentVoiceIndicator = "off";
+
+  const tryGroq = TTS_PROVIDER === "groq" || TTS_PROVIDER === "auto";
+  const tryElevenLabs = TTS_PROVIDER === "elevenlabs" || TTS_PROVIDER === "auto";
+
+  if (tryGroq) {
+    try {
+      await speakGroq(text);
+      currentVoiceIndicator = "groq";
+      return;
+    } catch (e) {
+      console.warn("[TTS] Groq TTS failed:", e);
     }
+    // In "auto" mode, fall through to ElevenLabs silently
   }
 
-  // ElevenLabs
-  if (TTS_PROVIDER === "elevenlabs" || TTS_PROVIDER === "google") {
-    const elKey = process.env.NEXT_PUBLIC_ELEVENLABS_API_KEY;
-    if (elKey) {
+  if (tryElevenLabs) {
+    const key = process.env.NEXT_PUBLIC_ELEVENLABS_API_KEY;
+    if (key) {
       try {
-        await speakElevenLabs(text, elKey);
+        await speakElevenLabs(text, key);
         currentVoiceIndicator = "elevenlabs";
         return;
       } catch (e) {
-        console.warn("[TTS] ElevenLabs failed, falling back:", e);
+        console.warn("[TTS] ElevenLabs failed:", e);
       }
+    } else if (TTS_PROVIDER === "elevenlabs") {
+      console.warn("[TTS] NEXT_PUBLIC_ELEVENLABS_API_KEY not set — skipping speech.");
+      return;
     }
   }
 
-  // Browser speechSynthesis
-  await speakBrowser(text);
-  currentVoiceIndicator = "browser";
+  // All configured providers exhausted — stay silent, never fall back to browser.
+  console.warn("[TTS] All providers failed or unconfigured — staying silent.");
 }
 
-async function speakGoogle(text: string, apiKey: string): Promise<void> {
-  const res = await fetch(
-    `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        input: { text },
-        voice: {
-          languageCode: GOOGLE_TTS_LANGUAGE,
-          name: GOOGLE_TTS_VOICE,
-        },
-        audioConfig: { audioEncoding: "MP3" },
-      }),
-    }
-  );
-  if (!res.ok) throw new Error(`Google TTS ${res.status}`);
-  const data = await res.json();
-  const audio = new Audio(`data:audio/mp3;base64,${data.audioContent}`);
-  await new Promise<void>((resolve, reject) => {
-    audio.onended = () => resolve();
-    audio.onerror = reject;
-    audio.play().catch(reject);
+/** Cancel any currently-playing speech and clean up the object URL. */
+export function cancelSpeech(): void {
+  if (activeAudio) {
+    activeAudio.pause();
+    activeAudio.onended = null;
+    activeAudio.onerror = null;
+    activeAudio = null;
+  }
+  if (activeObjectUrl) {
+    URL.revokeObjectURL(activeObjectUrl);
+    activeObjectUrl = null;
+  }
+  currentVoiceIndicator = "off";
+}
+
+// ─── Provider implementations ─────────────────────────────────────────────────
+
+async function speakGroq(text: string): Promise<void> {
+  const res = await fetch("/api/tts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
   });
+  if (!res.ok) {
+    const body = await res.text();
+    // Special handling for terms acceptance error
+    if (body.includes("model_terms_required")) {
+      throw new Error(`Groq TTS: You must accept the model terms for canopylabs/orpheus-v1-english in the Groq console playground first.`);
+    }
+    throw new Error(`Groq TTS (via /api/tts) ${res.status} — ${body}`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  await playAudio(new Audio(url), url);
 }
 
 async function speakElevenLabs(text: string, apiKey: string): Promise<void> {
-  // Default voice: Rachel
-  const voiceId = "21m00Tcm4TlvDq8ikWAM";
   const res = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+    `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}`,
     {
       method: "POST",
       headers: {
@@ -168,61 +189,44 @@ async function speakElevenLabs(text: string, apiKey: string): Promise<void> {
       },
       body: JSON.stringify({
         text,
-        model_id: "eleven_monolingual_v1",
+        model_id: "eleven_multilingual_v2",
         voice_settings: { stability: 0.5, similarity_boost: 0.75 },
       }),
     }
   );
-  if (!res.ok) throw new Error(`ElevenLabs TTS ${res.status}`);
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`ElevenLabs TTS ${res.status} — ${body}`);
+  }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
-  const audio = new Audio(url);
-  await new Promise<void>((resolve, reject) => {
+  await playAudio(new Audio(url), url);
+}
+
+/**
+ * Stores the active Audio element in module-level refs so cancelSpeech()
+ * can interrupt it mid-playback and revoke any object URL.
+ */
+function playAudio(audio: HTMLAudioElement, objectUrl: string | null): Promise<void> {
+  // Stop anything currently playing before starting the new clip
+  cancelSpeech();
+
+  activeAudio = audio;
+  activeObjectUrl = objectUrl;
+
+  return new Promise<void>((resolve, reject) => {
     audio.onended = () => {
-      URL.revokeObjectURL(url);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      activeAudio = null;
+      activeObjectUrl = null;
       resolve();
     };
-    audio.onerror = reject;
+    audio.onerror = (e) => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      activeAudio = null;
+      activeObjectUrl = null;
+      reject(e);
+    };
     audio.play().catch(reject);
   });
-}
-
-function speakBrowser(text: string): Promise<void> {
-  return new Promise<void>((resolve) => {
-    if (!("speechSynthesis" in window)) {
-      resolve();
-      return;
-    }
-    window.speechSynthesis.cancel();
-    const utter = new SpeechSynthesisUtterance(text);
-    utter.rate = 1.0;
-    utter.pitch = 1.0;
-
-    const setVoice = () => {
-      const voices = window.speechSynthesis.getVoices();
-      const preferred = voices.find(
-        (v) =>
-          v.lang.startsWith("en") && (v.name.includes("Female") || v.name.includes("Google"))
-      );
-      if (preferred) utter.voice = preferred;
-    };
-
-    if (window.speechSynthesis.getVoices().length > 0) {
-      setVoice();
-    } else {
-      window.speechSynthesis.addEventListener("voiceschanged", setVoice, {
-        once: true,
-      });
-    }
-
-    utter.onend = () => resolve();
-    utter.onerror = () => resolve();
-    window.speechSynthesis.speak(utter);
-  });
-}
-
-export function cancelSpeech(): void {
-  if ("speechSynthesis" in window) {
-    window.speechSynthesis.cancel();
-  }
 }

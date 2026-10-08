@@ -149,28 +149,33 @@ export async function extractSalientFacts(
 ): Promise<string[]> {
   const groq = getGroqClient();
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
-  const prompt = `Extract 0–3 salient facts worth remembering from this conversation turn. Return a JSON array of strings. Each fact should be a complete sentence with date context. If nothing is worth storing, return [].
+  const prompt = `Extract 0–3 salient facts worth remembering from this conversation turn. Return ONLY a raw JSON array of strings — no markdown, no wrapping keys, no explanation. Each fact must be a complete sentence with date context. If nothing is worth storing, return [].
 
 Today: ${today}
 User said: "${userMessage}"
 Rico replied: "${assistantReply}"
 
-Return format: ["fact 1", "fact 2"]`;
+Example output: ["Fact one.", "Fact two."]`;
 
   const completion = await groq.chat.completions.create({
     model: GROQ_MODEL,
     messages: [{ role: "user", content: prompt }],
     max_tokens: 200,
     temperature: 0.2,
-    response_format: { type: "json_object" },
+    // response_format intentionally omitted — this model returns empty strings
+    // for short json_object outputs, triggering json_validate_failed errors.
   });
 
   try {
-    const raw = completion.choices[0]?.message?.content ?? "{}";
-    // The model might return { facts: [] } or just []
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed;
-    if (Array.isArray(parsed.facts)) return parsed.facts;
+    const raw = (completion.choices[0]?.message?.content ?? "").trim();
+    if (!raw) return [];
+
+    // Extract the first [...] block in case the model wraps the array in prose
+    const match = raw.match(/\[[\s\S]*\]/);
+    if (!match) return [];
+
+    const parsed = JSON.parse(match[0]);
+    if (Array.isArray(parsed)) return parsed.filter((f) => typeof f === "string");
     return [];
   } catch {
     return [];
