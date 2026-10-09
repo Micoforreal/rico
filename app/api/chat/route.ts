@@ -3,9 +3,12 @@ import { recallMemories, writeMemory } from "@/lib/memory";
 import { buildSystemMessage, extractSalientFacts, getGroqClient } from "@/lib/groq";
 import { searchMessages, fetchRecentMessages, fetchFullMessage } from "@/lib/gmail";
 import { GROQ_MODEL } from "@/lib/config";
-import type { ChatCompletionMessageParam } from "groq-sdk/resources/chat/completions";
+import type {
+  ChatCompletionMessageParam,
+  ChatCompletionTool,
+} from "groq-sdk/resources/chat/completions";
 
-const gmailTools = [
+const gmailTools: ChatCompletionTool[] = [
   {
     type: "function" as const,
     function: {
@@ -45,7 +48,7 @@ const gmailTools = [
   }
 ];
 
-const draftTool = {
+const draftTool: ChatCompletionTool = {
   type: "function" as const,
   function: {
     name: "gmail_draft",
@@ -103,16 +106,14 @@ export async function POST(req: NextRequest) {
     let gmailAuthExpired = false;
     let emailPreview: any = undefined;
 
-    const availableTools = [...gmailTools];
-    if (gmailPermission === "read-send") {
-      availableTools.push(draftTool);
-    }
+    const availableTools: ChatCompletionTool[] =
+      gmailPermission === "read-send" ? [...gmailTools, draftTool] : gmailTools;
 
     let rounds = 0;
     while (rounds < 3) {
       rounds++;
 
-      console.log(`[chat] round ${rounds}: tools offered:`, gmailToken ? availableTools.map(t => t.function.name) : "NONE (no gmailToken)");
+      console.log(`[chat] round ${rounds}: tools offered:`, gmailToken ? availableTools.map((t) => t.function!.name) : "NONE (no gmailToken)");
 
       const completion = await groq.chat.completions.create({
         model: GROQ_MODEL,
