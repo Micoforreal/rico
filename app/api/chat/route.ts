@@ -49,14 +49,16 @@ const draftTool = {
   type: "function" as const,
   function: {
     name: "gmail_draft",
-    description: "Draft an email reply or a new email. Return the full draft details. Do NOT output the draft in your message text, ONLY use this tool.",
+    description: "Draft an email reply or a new email. Return the full draft details. When replying, ALWAYS populate `to` with the raw sender's email address parsed from the original message's From header (e.g. addr@example.com). NEVER output an empty `to` field. Do NOT output the draft in your message text, ONLY use this tool.",
     parameters: {
       type: "object",
       properties: {
-        to: { type: "string" },
+        to: { type: "string", description: "Recipient's email address (must be a valid email like addr@example.com)" },
         subject: { type: "string" },
         body: { type: "string", description: "The full text body of the email" },
-        inReplyToMsgId: { type: "string", description: "Message ID if replying" }
+        inReplyToMsgId: { type: "string", description: "Message ID if replying" },
+        threadId: { type: "string", description: "Thread ID if replying" },
+        references: { type: "string", description: "References header if replying" }
       },
       required: ["to", "subject", "body"]
     }
@@ -166,7 +168,9 @@ export async function POST(req: NextRequest) {
                 to: args.to,
                 subject: args.subject,
                 body: args.body,
-                inReplyToMsgId: args.inReplyToMsgId
+                inReplyToMsgId: args.inReplyToMsgId,
+                threadId: args.threadId,
+                references: args.references
               };
               reply = "Here's your draft — confirm to send.";
               break;

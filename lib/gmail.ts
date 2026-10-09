@@ -25,6 +25,8 @@ export interface GmailFullMessage extends GmailMessage {
   body: string;
   to: string;
   messageId: string;
+  threadId: string;
+  references: string;
 }
 
 /** List message IDs matching a query */
@@ -136,6 +138,8 @@ export async function fetchFullMessage(
     snippet: data.snippet ?? "",
     body,
     messageId: get("message-id"),
+    threadId: data.threadId,
+    references: get("references") || get("message-id"),
   };
 }
 
@@ -185,8 +189,14 @@ export async function sendEmail(
   to: string,
   subject: string,
   body: string,
-  inReplyToMsgId?: string
+  inReplyToMsgId?: string,
+  threadId?: string,
+  references?: string
 ): Promise<{ id: string }> {
+  if (!to || !to.includes("@")) {
+    throw new Error("No recipient address provided");
+  }
+
   const mimeLines = [
     `To: ${to}`,
     `Subject: ${subject}`,
@@ -194,10 +204,16 @@ export async function sendEmail(
     "Content-Transfer-Encoding: 8bit",
     "MIME-Version: 1.0",
     ...(inReplyToMsgId ? [`In-Reply-To: ${inReplyToMsgId}`] : []),
+    ...(references ? [`References: ${references}`] : []),
     "",
     body,
   ];
   const raw = base64UrlEncode(mimeLines.join("\r\n"));
+
+  const payload: any = { raw };
+  if (threadId) {
+    payload.threadId = threadId;
+  }
 
   const res = await fetch(`${GMAIL_BASE}/messages/send`, {
     method: "POST",
@@ -205,7 +221,7 @@ export async function sendEmail(
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ raw }),
+    body: JSON.stringify(payload),
   });
   if (res.status === 401) {
     throw new GmailAuthExpiredError();
